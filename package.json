@@ -16,5 +16,8 @@
   "bugs": {
     "url": "https://github.com/lebster/WAVAnalyze/issues"
   },
-  "homepage": "https://github.com/lebster/WAVAnalyze#readme"
+  "homepage": "https://github.com/lebster/WAVAnalyze#readme",
+  "dependencies": {
+    "play-sound": "^1.1.3"
+  }
 }

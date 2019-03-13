@@ -1,4 +1,6 @@
 var fs = require('fs');
+var player = require('play-sound')(opts = {})
+
 var readline = require('readline')
 
 var rl = readline.createInterface({
@@ -11,7 +13,8 @@ function ask() {
         if(answer === 'q'){
             rl.close();
         } else{
-        readWavFile(answer);
+        //readWavFile(answer);
+        readWavFile('/Users/lebster/Downloads/tolling-bell_daniel-simion.wav');
         rl.close();
         }
     });
@@ -66,7 +69,7 @@ function WavFile(buffer){
     this.bitPerSample = new BufferItem(buffer.slice(34, 36), types.number16);
     this.dataSubChunkStart = new BufferItem(buffer.slice(36, 40), types.text);
     this.dataSubChunkSize = new BufferItem(buffer.slice(40, 44), types.number);
-    this.soundData = new BufferItem(buffer.slice(44, this.dataSubChunkSize.getValue() + 44), types.number);
+    this.soundData = new BufferItem(buffer.slice(44, this.dataSubChunkSize.getValue() + 44), types.number16);
     this.restOfData = new BufferItem(buffer.slice(this.dataSubChunkSize.getValue() + 44, buffer.length), types.text);
 }
 
@@ -76,6 +79,19 @@ WavFile.prototype.print = function(){
             console.log(key, this[key].getValue());
         } else {
             console.log(key, this[key].buffer.byteLength);
+        }
+    });
+};
+
+WavFile.prototype.printSpecial = function(){
+    Object.keys(this).forEach(key => {
+        if (key === 'soundData') {
+            console.log(key, this[key].buffer.byteLength, ' - ', this[key].buffer.slice(1000,1100).toString('hex'));
+        }
+        else if(key !== 'soundData' && key !== 'fullBuffer') {
+            console.log(key, this[key].getValue(), ' - ', this[key].buffer.toString('hex') , ' - ', this[key].buffer.byteLength);
+        } else {
+            console.log(key, this[key].buffer.byteLength, ' - ', this[key].buffer.slice(0,10).toString('hex'));
         }
     });
 };
@@ -110,18 +126,130 @@ WavFile.prototype.reBuildFullBuffer = function(){
 
 function loadWavFile(buffer) {
     var data = new WavFile(buffer);
-    // data.dataSubChunkSize.buffer[0]= '00';
-    // data.dataSubChunkSize.buffer[1]= '00';
-    // data.dataSubChunkSize.buffer[2]= '00';
-    // data.dataSubChunkSize.buffer[3]= '00';
-     //data.soundData.buffer = Buffer.from(data.soundData.buffer.reverse());
-     //data.soundData.buffer = Buffer.from(shuffle(data.soundData.buffer));
-     data.reBuildFullBuffer();
+
+     data.soundData.buffer = Buffer.from(data.soundData.buffer.slice(0,data.soundData.buffer.byteLength / 4));
+
+     data.soundData.buffer = correctLength(data.soundData.buffer, 4);
+     
+     var left = copyBuffer(data.soundData.buffer);
+     var right = copyBuffer(data.soundData.buffer);
+
+     left = Buffer.from(reverse(removeChannel(left, false), 4));
+     right = Buffer.from(removeChannel(right, true));
+     //var right = removeChannel(data.soundData.buffer.slice(0),true);
+     //var combined = Buffer.concat([left, right]);
+     var combined = Buffer.concat([left, right], left.length + right.length);
+     data.soundData.buffer = combined;
+     console.log('asdf', left);
+
+     var buf = Buffer.allocUnsafe(4);
+     buf.writeInt32LE(data.soundData.buffer.byteLength);
+     data.dataSubChunkSize.buffer = buf;
+    // data.soundData.buffer = Buffer.from(removeChannel(data.soundData.buffer.slice(),0));
+
+    //data.soundData.buffer = Buffer.from(data.soundData.buffer.reverse());
+    //data.soundData.buffer = Buffer.from(shuffle(data.soundData.buffer));
+    data.reBuildFullBuffer();
+    data.printSpecial();
      //console.log(data.fullBuffer.toString('hex'));
-    fs.writeFile('temp.txt', data.fullBuffer.toString('base64'), function(err, data){
+    //writeToFile(data);
+    writeToWavFile(data);
+    playFile(data);
+}
+
+function playFile(wavFile){
+    player.play('temp.wav', function(err){
+        if(err && !err.killed) throw err;
+    });
+}
+function writeToWavFile(wavFile){
+    fs.writeFile('temp.wav', wavFile.fullBuffer, function(err, data){
         if (err) throw err;
         console.log('file written');
     });
+}
+
+function copyBuffer(buffer){
+    return Buffer.from(buffer.toString('hex'),'hex');
+}
+
+function writeToFile(wavFile){
+    fs.writeFile('temp.txt', wavFile.fullBuffer.toString('base64'), function(err, data){
+        if (err) throw err;
+        console.log('file written');
+    });
+}
+
+function correctLength(buffer, blockSize){
+     //correct length
+     //should use block align size for % x
+    switch (buffer.byteLength % blockSize) {
+        case 1:
+            buffer = Buffer.from(buffer.slice(0, buffer.byteLength - 1));
+            break;
+        case 3:
+            buffer = Buffer.from(buffer.slice(0, buffer.byteLength - 3));
+            break;
+        case 2:
+            buffer = Buffer.from(buffer.slice(0, buffer.byteLength - 2));
+            break;
+        default:
+            break;
+     }
+     return buffer;
+
+}
+
+//channel 0 = left , 1 = right
+function removeChannel(array, channel){
+    var channelPos = 0;
+
+    for(var i = 0; i <= array.length; i++){
+        if(channelPos <= 1 && !channel){
+            array[i] = 0;
+        }
+        if(channelPos >= 2 && channel){
+            array[i] = 0;
+        }
+
+        channelPos++;
+        if(channelPos === 4){
+            channelPos = 0;
+        }
+    }
+    return array;
+}
+
+function reverse(array, blockSize) {
+    console.log(array.slice(0, 8));
+    console.log(array.slice(array.length - 8, array.length));
+    var len = array.length;
+    var middle = Math.floor(len/2);
+    var lower = 0;
+
+    while( lower <= middle){
+        var upper = len - lower - (blockSize);
+        var pos = 0;
+        while (pos <= 3){
+            var l = array[lower + pos];
+            array[lower+ pos] = array[upper + pos];
+            array[upper+ pos] = l;
+            pos++;
+        }
+        // var lowerv = array.slice(lower, lower + (blockSize - 1));
+        // var upperV = array.slice(upper, upper + (blockSize - 1));
+        // var argsl = [lower, lower+(blockSize - 1)].concat(upperV);
+        // var argsu = [upper, upper+(blockSize - 1)].concat(lowerv);
+        // console.log(len, lower, upper)
+        // Array.prototype.splice.apply(array, argsl);
+        // Array.prototype.splice.apply(array, argsu);
+
+
+        lower = lower + blockSize;
+    }
+    console.log(array.slice(0, 8));
+    console.log(array.slice(array.length - 8, array.length));
+    return array;
 }
 
 function shuffle(array) {
